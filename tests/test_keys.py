@@ -14,6 +14,11 @@ def test_space_and_letter():
     assert resolve_key("v") == 0x09
 
 
+def test_backtick():
+    assert resolve_key("`") == 0x32
+    assert resolve_key("grave") == 0x32
+
+
 def test_unknown_key():
     with pytest.raises(ValueError, match="unknown key"):
         resolve_key("not-a-key")

@@ -40,6 +40,35 @@ The first launch needs permission to post keys: System Settings → Privacy & Se
 
 Stop the listener with Ctrl-C. If a key is still down, the program releases it on the way out.
 
+Saved hotkeys live in `~/Library/Application Support/h250mac/config.json`. When you omit `--key`, `--key2`, or `--byte`, `h250-ptt` reads that file.
+
+## Menu bar app
+
+Install the **H250 PTT** app into Applications (recommended). It runs from the top menu bar only (no Dock icon) and walks you through Accessibility on first launch:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+chmod +x scripts/install_menubar_app.sh
+./scripts/install_menubar_app.sh
+open ~/Applications/H250\ PTT.app
+```
+
+On first launch, follow the alert and enable **H250 PTT** under System Settings → Privacy & Security → Accessibility (the handset photo is the app icon there). Use the menu item **Accessibility: required — click to enable** if you need the prompt again.
+
+Icons are built from `macos/AppIconSource.jpg` when you run the install script. To refresh them after changing the source image: `./scripts/generate_macos_icons.sh`.
+
+Presets include F13–F16, F18, backtick (`` ` ``), space, and V. Secondary can be **Off** or any of those keys.
+
+For development without the `.app` bundle:
+
+```bash
+python -m pip install -e ".[menubar]"
+h250-ptt-menubar
+```
+
+macOS may list the running app as **Python** instead of **H250 PTT** when launched this way; enable that name in Accessibility.
+
 ## What the button report looks like
 
 The handset enumerates as USB vendor `0x0D8C`, product `0x0013` (or `0xAAA0`–`0xAAAF` if that unit was given its own id). The Windows mapper reads input-report byte 2:

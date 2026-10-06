@@ -36,6 +36,21 @@ def accessibility_trusted() -> bool:
     return bool(_ax.AXIsProcessTrusted())
 
 
+def request_accessibility_prompt() -> bool:
+    """Ask macOS to show the Accessibility permission dialog when possible."""
+    try:
+        from Foundation import NSDictionary, NSNumber
+        from ApplicationServices import AXIsProcessTrustedWithOptions
+    except ImportError:
+        return accessibility_trusted()
+
+    options = NSDictionary.dictionaryWithObject_forKey_(
+        NSNumber.numberWithBool_(True),
+        "AXTrustedCheckOptionPrompt",
+    )
+    return bool(AXIsProcessTrustedWithOptions(options))
+
+
 def post_key(keycode: int, down: bool) -> None:
     source = _cg.CGEventSourceCreate(HID_SOURCE)
     event = _cg.CGEventCreateKeyboardEvent(source, keycode, down)

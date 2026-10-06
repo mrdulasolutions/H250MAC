@@ -5,8 +5,12 @@ from __future__ import annotations
 import argparse
 import signal
 import sys
+import threading
 import time
+from collections.abc import Callable
 
+from h250mac.bindings import BindingStore
+from h250mac.config import load_config
 from h250mac.events import accessibility_trusted, post_key
 from h250mac.keys import DEFAULT_KEY, resolve_key
 from h250mac.protocol import PIDS, REPORT_BYTE, VID, button_nibble
@@ -71,19 +75,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--key",
-        default=DEFAULT_KEY,
-        help=f"key to hold while the side button is down (default: {DEFAULT_KEY})",
+        default=None,
+        help=f"key to hold while the side button is down (default: config or {DEFAULT_KEY})",
     )
     parser.add_argument(
         "--key2",
-        default="",
-        help="optional key for the second side control",
+        default=None,
+        help="optional key for the second side control (default: from config)",
     )
     parser.add_argument(
         "--byte",
         type=int,
-        default=REPORT_BYTE,
-        help=f"input-report byte that carries the button (default: {REPORT_BYTE})",
+        default=None,
+        help=f"input-report byte that carries the button (default: config or {REPORT_BYTE})",
     )
     parser.add_argument(
         "--dump",
@@ -98,85 +102,89 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    try:
-        keycode = resolve_key(args.key)
-    except ValueError as exc:
-        log(str(exc))
-        return 2
-    key2 = None
-    if args.key2:
-        try:
-            key2 = resolve_key(args.key2)
-        except ValueError as exc:
-            log(str(exc))
-            return 2
+def _sync_bindings(
+    bindings: BindingStore,
+    held: dict[int, bool],
+    keycodes: dict[int, int | None],
+    names: dict[int, str],
+    dump: bool,
+    log_fn: Callable[[str], None],
+) -> None:
+    snap = bindings.snapshot()
+    for button in (1, 2):
+        new_code = snap.keycodes[button]
+        old_code = keycodes[button]
+        if new_code == old_code and snap.names[button] == names[button]:
+            continue
+        if held[button] and old_code is not None and not dump:
+            post_key(old_code, False)
+            held[button] = False
+        keycodes[button] = new_code
+        names[button] = snap.names[button]
 
-    if args.check:
-        found = matching_devices()
-        if not found:
-            log("H250-USB HID interface is not present. Plug the handset into a USB-C port.")
-            return 1
-        for info in found:
-            log("found " + describe(info))
-        return 0
 
-    key_name = args.key.strip().lower()
-    if args.dump:
-        log("dump only. keys will not be posted.")
+def run_listener(
+    bindings: BindingStore,
+    *,
+    report_byte: int,
+    dump: bool = False,
+    log_fn: Callable[[str], None] = log,
+    stop_event: threading.Event | None = None,
+) -> int:
+    def should_stop() -> bool:
+        return stop_event is not None and stop_event.is_set()
+
+    snap = bindings.snapshot()
+    key_name = snap.names[1]
+    if dump:
+        log_fn("dump only. keys will not be posted.")
     elif accessibility_trusted():
-        log(f"accessibility permission is on. holding {key_name} while the side button is down.")
+        log_fn(f"accessibility permission is on. holding {key_name} while the side button is down.")
     else:
-        log(
+        log_fn(
             "accessibility permission is off, so the button will be detected "
             "but the key cannot be posted yet. System Settings → Privacy & "
             "Security → Accessibility, and enable the app you launched this from."
         )
 
     held = {1: False, 2: False}
-    keycodes = {1: keycode, 2: key2}
-    names = {1: key_name, 2: args.key2.strip().lower() if args.key2 else ""}
-    stop = False
+    keycodes = dict(snap.keycodes)
+    names = dict(snap.names)
 
     def release_all() -> None:
         for which, is_down in list(held.items()):
-            if is_down and keycodes[which] is not None and not args.dump:
+            if is_down and keycodes[which] is not None and not dump:
                 post_key(keycodes[which], False)
             held[which] = False
-
-    def handle_stop(_signum, _frame) -> None:
-        nonlocal stop
-        stop = True
-
-    signal.signal(signal.SIGINT, handle_stop)
-    signal.signal(signal.SIGTERM, handle_stop)
 
     devs: list[tuple[dict, object]] = []
     announced = False
     last_report: dict[object, tuple[int, ...]] = {}
 
     try:
-        while not stop:
+        while not should_stop():
+            _sync_bindings(bindings, held, keycodes, names, dump, log_fn)
             if not devs:
                 devs = open_devices()
                 if not devs:
                     if not announced:
-                        log("waiting for the H250-USB. Plug it into a USB-C port.")
+                        log_fn("waiting for the H250-USB. Plug it into a USB-C port.")
                         announced = True
                     time.sleep(0.5)
                     continue
                 announced = False
                 for info, _dev in devs:
-                    log("listening on " + describe(info))
-                log("press the side button. each new report is printed once.")
+                    log_fn("listening on " + describe(info))
+                log_fn("press the side button. each new report is printed once.")
 
             closed = False
             for info, dev in devs:
+                if should_stop():
+                    break
                 try:
                     report = dev.read(64, timeout_ms=30)
                 except OSError as exc:
-                    log(f"handset read failed ({exc}). waiting for it to come back.")
+                    log_fn(f"handset read failed ({exc}). waiting for it to come back.")
                     closed = True
                     break
                 if not report:
@@ -186,9 +194,10 @@ def main(argv: list[str] | None = None) -> int:
                 if last_report.get(path) == signature:
                     continue
                 last_report[path] = signature
-                which = button_nibble(report, args.byte)
-                shown = report[args.byte] if args.byte < len(report) else "-"
-                log(f"report[{args.byte}]={shown}  {hex_report(report)}")
+                which = button_nibble(report, report_byte)
+                shown = report[report_byte] if report_byte < len(report) else "-"
+                log_fn(f"report[{report_byte}]={shown}  {hex_report(report)}")
+                _sync_bindings(bindings, held, keycodes, names, dump, log_fn)
                 for button in (1, 2):
                     down = which == button
                     if down == held[button]:
@@ -197,17 +206,17 @@ def main(argv: list[str] | None = None) -> int:
                     if code is None:
                         held[button] = down
                         if down:
-                            log(f"control {button} is down (no key mapped).")
+                            log_fn(f"control {button} is down (no key mapped).")
                         continue
-                    if not args.dump:
+                    if not dump:
                         if not accessibility_trusted():
-                            log(
+                            log_fn(
                                 f"control {button} {'down' if down else 'up'}, "
                                 "key not posted (Accessibility is off)."
                             )
                         else:
                             post_key(code, down)
-                            log(f"{names[button]} {'down' if down else 'up'}")
+                            log_fn(f"{names[button]} {'down' if down else 'up'}")
                     held[button] = down
             if closed:
                 release_all()
@@ -226,6 +235,52 @@ def main(argv: list[str] | None = None) -> int:
             except OSError:
                 pass
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    file_config = load_config()
+    key_name = args.key if args.key is not None else file_config.key
+    key2_name = args.key2 if args.key2 is not None else file_config.key2
+    report_byte = args.byte if args.byte is not None else file_config.byte
+
+    try:
+        resolve_key(key_name)
+    except ValueError as exc:
+        log(str(exc))
+        return 2
+    if key2_name:
+        try:
+            resolve_key(key2_name)
+        except ValueError as exc:
+            log(str(exc))
+            return 2
+
+    if args.check:
+        found = matching_devices()
+        if not found:
+            log("H250-USB HID interface is not present. Plug the handset into a USB-C port.")
+            return 1
+        for info in found:
+            log("found " + describe(info))
+        return 0
+
+    bindings = BindingStore(key_name, key2_name)
+    stop_event = threading.Event()
+
+    def handle_stop(_signum, _frame) -> None:
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, handle_stop)
+    signal.signal(signal.SIGTERM, handle_stop)
+
+    return run_listener(
+        bindings,
+        report_byte=report_byte,
+        dump=args.dump,
+        log_fn=log,
+        stop_event=stop_event,
+    )
 
 
 if __name__ == "__main__":
