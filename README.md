@@ -11,8 +11,8 @@ The Windows installer does not run on a Mac. Leave it on the CD.
 Python 3.11 or newer. The `hidapi` package ships its own library, so Homebrew is not required.
 
 ```bash
-git clone https://github.com/mrdulasolutions/h250-mac.git
-cd h250-mac
+git clone https://github.com/mrdulasolutions/H250MAC.git
+cd H250MAC
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install .
