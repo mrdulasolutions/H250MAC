@@ -1,0 +1,25 @@
+[project]
+name = "h250mac"
+version = "0.1.0"
+description = "Hold a Mac key while the TEC H250-USB side button is down"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "M.R. Dula" }]
+dependencies = ["hidapi"]
+
+[project.scripts]
+h250-ptt = "h250mac.listener:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
