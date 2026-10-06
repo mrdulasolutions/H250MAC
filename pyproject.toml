@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Hold a Mac key while the TEC H250-USB side button is down"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "LicenseRef-Proprietary"
 authors = [{ name = "M.R. Dula" }]
 dependencies = ["hidapi"]
 

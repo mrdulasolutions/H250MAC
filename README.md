@@ -44,17 +44,17 @@ Saved hotkeys live in `~/Library/Application Support/h250mac/config.json`. When 
 
 ## Menu bar app
 
-Install the **H250 PTT** app into Applications (recommended). It runs from the top menu bar only (no Dock icon) and walks you through Accessibility on first launch:
+Install the **H250** app into Applications (recommended). It runs from the top menu bar only (no Dock icon) and walks you through Accessibility on first launch. macOS lists it as **H250**, not Python.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 chmod +x scripts/install_menubar_app.sh
 ./scripts/install_menubar_app.sh
-open ~/Applications/H250\ PTT.app
+open ~/Applications/H250.app
 ```
 
-On first launch, follow the alert and enable **H250 PTT** under System Settings → Privacy & Security → Accessibility (the handset photo is the app icon there). Use the menu item **Accessibility: required — click to enable** if you need the prompt again.
+On first launch, follow the alert and enable **H250** under System Settings → Privacy & Security → Accessibility (the handset photo is the app icon there). Use the menu item **Accessibility: required — click to enable** if you need the prompt again.
 
 Icons are built from `macos/AppIconSource.jpg` when you run the install script. To refresh them after changing the source image: `./scripts/generate_macos_icons.sh`.
 
@@ -67,7 +67,7 @@ python -m pip install -e ".[menubar]"
 h250-ptt-menubar
 ```
 
-macOS may list the running app as **Python** instead of **H250 PTT** when launched this way; enable that name in Accessibility.
+macOS lists that process as **Python**. Use `open ~/Applications/H250.app` when you want the permission dialog to say **H250**.
 
 ## What the button report looks like
 
@@ -96,4 +96,4 @@ The tests cover the report byte and the key names. They do not need the handset.
 
 ## License
 
-MIT.
+Proprietary. Copyright (c) 2026 MRDula Solutions. All rights reserved.
