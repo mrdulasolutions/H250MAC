@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from h250mac.keys import DEFAULT_KEY, canonical_key_name
+from h250mac.keys import DEFAULT_KEY, canonical_key_name, shortcut_label
 from h250mac.protocol import REPORT_BYTE
 
 @dataclass(frozen=True)
@@ -71,18 +71,22 @@ def status_label(
     if not key_name:
         return "Off"
     matches = matching_labels(presets, key_name)
-    if saved_label and (saved_label in matches or not matches):
+    if saved_label and (
+        saved_label in matches
+        or not matches
+        or saved_label == shortcut_label(key_name)
+    ):
         return saved_label
     if matches:
         return ", ".join(matches)
-    return display_name(key_name)
+    return shortcut_label(key_name)
 
 
 def _keep_label(presets: tuple[HotkeyPreset, ...], key_name: str, label: str) -> str:
     if not isinstance(label, str) or not label:
         return ""
     matches = matching_labels(presets, key_name)
-    if matches and label not in matches:
+    if matches and label not in matches and label != shortcut_label(key_name):
         return ""
     return label
 

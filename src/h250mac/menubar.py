@@ -11,14 +11,14 @@ from h250mac.config import (
     PRIMARY_PRESETS,
     SECONDARY_PRESETS,
     HotkeyPreset,
-    display_name,
     load_config,
+    matching_labels,
     preset_keys,
     save_config,
     status_label,
 )
 from h250mac.events import accessibility_trusted, request_accessibility_prompt
-from h250mac.keys import menu_key_name
+from h250mac.keys import shortcut_label
 from h250mac.listener import matching_devices, run_listener
 from h250mac.macos_gui import (
     APP_BUNDLE_NAME,
@@ -46,6 +46,8 @@ LEGACY_ACCESSIBILITY_URL = (
 
 
 def quiet_listener_log(msg: str) -> None:
+    # No console in the menu bar app. Silence here is normal and does not
+    # mean Accessibility was refused. The menu item shows that state.
     if msg.startswith("report["):
         return
 
@@ -164,32 +166,16 @@ class H250MenubarApp(rumps.App):
         self._prompt_key(2)
 
     def _prompt_key(self, which: int) -> None:
-        current = self.cfg.key if which == 1 else self.cfg.key2
-        presets = PRIMARY_PRESETS if which == 1 else SECONDARY_PRESETS
+        from h250mac.capture import capture_shortcut
+
         title = "Mac hotkey" if which == 1 else "Windows hotkey"
-        if which == 1:
-            message = "Examples: control-m, option-space, space, f18. Uptick is the ` key."
-        else:
-            message = (
-                "Examples: control-space, control-m, space, v. "
-                "Leave the box empty, or type off, to clear it."
-            )
-        response = rumps.Window(
-            message,
-            title,
-            default_text=current,
-            ok="Set",
-            cancel="Cancel",
-            dimensions=(360, 24),
-        ).run()
-        if not response.clicked:
+        captured = capture_shortcut(title, allow_off=which == 2)
+        if captured is None:
             return
-        try:
-            key_name = menu_key_name(response.text or "", required=which == 1)
-        except ValueError as exc:
-            rumps.alert(title, str(exc), "OK")
+        if not captured:
+            self._select_key(which, "", "Off")
             return
-        self._select_key(which, key_name, status_label(presets, key_name))
+        self._select_key(which, captured, shortcut_label(captured))
 
     def _select_key(self, which: int, key_name: str, label: str = "") -> None:
         if which == 1:
@@ -213,9 +199,14 @@ class H250MenubarApp(rumps.App):
             return
         if extra in items:
             items.remove(extra)
-        if key_name and key_name not in preset_keys(presets):
+        preset_labels = set(matching_labels(presets, key_name))
+        custom = bool(key_name) and (
+            key_name not in preset_keys(presets)
+            or (bool(label) and label not in preset_labels)
+        )
+        if custom:
             extra.hidden = False
-            extra.title = label or display_name(key_name)
+            extra.title = label or shortcut_label(key_name)
             extra._h250_key = key_name  # type: ignore[attr-defined]
             extra._h250_label = extra.title  # type: ignore[attr-defined]
             items.append(extra)
@@ -267,21 +258,15 @@ class H250MenubarApp(rumps.App):
             "H250 needs Accessibility access to hold your chosen hotkey while the "
             "side button is down.\n\n"
             "1. macOS may show a dialog — choose Open System Settings.\n"
-            f"2. Turn on the switch for “{APP_BUNDLE_NAME}” (or Python if you run "
-            "from Terminal).\n"
-            "3. If the app is missing, click + and add it from Applications.\n\n"
-            "You can reopen this flow anytime from the Accessibility menu item.",
+            f"2. Turn on the switch for “{APP_BUNDLE_NAME}”.\n"
+            "3. Leave Python and uv off. Those are different programs and "
+            "cannot post keys for this app.\n\n"
+            "You can reopen this flow from the Accessibility menu item. "
+            "A startup alert is not shown, so the menu bar icon can appear first.",
             "Continue",
             icon_path=alert_icon_path(),
         )
         request_accessibility_prompt()
-
-    @rumps.timer(0.5)
-    def onboarding(self, sender: rumps.Timer) -> None:
-        sender.stop()
-        if not accessibility_trusted():
-            self._show_accessibility_walkthrough()
-        self._update_accessibility_line()
 
     @rumps.timer(2)
     def poll_handset(self, _timer: object) -> None:

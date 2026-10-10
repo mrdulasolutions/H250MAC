@@ -1,15 +1,26 @@
 #!/usr/bin/env bash
-# Build ~/Applications/H250 PTT.app as an in-process arm64 launcher.
+# Install H250 PTT.app into /Applications on the startup disk.
 # macOS 26 shows a menu-bar icon only when the running image is the app's
 # own Mach-O. A shell script that execs Python stays invisible.
+# The Mach-O contains no home directory. Python paths live in the app bundle.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="$ROOT/.venv"
 APP_NAME="H250 PTT.app"
-DEST="$HOME/Applications/$APP_NAME"
+DEST="/Applications/${APP_NAME}"
 CLANG="/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang"
 SDK_DIR="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs"
+
+if [[ $# -ne 0 ]]; then
+  echo "H250 PTT installs to /Applications. Do not pass a destination." >&2
+  exit 2
+fi
+
+if [[ ! -w /Applications ]]; then
+  echo "Cannot write /Applications. Install H250 PTT there on the startup disk." >&2
+  exit 1
+fi
 
 if [[ ! -x "$VENV/bin/python" ]]; then
   echo "Create the venv first, using the Python you want the app to run:" >&2
@@ -29,8 +40,7 @@ cp "$ROOT/macos/AppIcon.icns" "$DEST/Contents/Resources/AppIcon.icns"
 
 # Resolve the interpreter with the venv itself. macOS readlink has no -f.
 # /usr/bin/python3 exits 69 until the Xcode license is accepted; do not accept it.
-# base_prefix, headers, and site-packages follow the venv, so the same script
-# works when $HOME is on an external volume or under /Users.
+# The venv reports its own prefix, headers, and site-packages.
 eval "$("$VENV/bin/python" - "$ROOT" <<'PY'
 import os
 import shlex
@@ -84,30 +94,97 @@ if [[ ! -d "$PYINCLUDE" ]]; then
   fail "Python headers were not found at $PYINCLUDE."
 fi
 
-LAUNCHER="$DEST/Contents/MacOS/H250 PTT"
-LAUNCHER_SRC="$(mktemp "${TMPDIR:-/tmp}/h250-launcher.XXXXXX.c")"
-# Write the C file from Python so a home path with spaces (or quotes) is escaped.
-"$VENV/bin/python" - "$LAUNCHER_SRC" "$PYHOME" "$PYPATH" <<'PY'
+# Paths stay out of the Mach-O. They live inside the app in /Applications.
+"$VENV/bin/python" - "$DEST" "$PYHOME" "$PYPATH" <<'PY'
+import os
 import sys
 
-path, home, pythonpath = sys.argv[1:]
-
-def c_string(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-source = f"""#include <stdlib.h>
-#include <Python.h>
-int main(void) {{
-    setenv("PYTHONHOME", "{c_string(home)}", 1);
-    setenv("PYTHONPATH", "{c_string(pythonpath)}", 1);
-    Py_Initialize();
-    int rc = PyRun_SimpleString("from h250mac.menubar import main; raise SystemExit(main() or 0)");
-    return rc == 0 ? 0 : 1;
-}}
-"""
-with open(path, "w", encoding="utf-8") as handle:
-    handle.write(source)
+dest, pythonhome, pythonpath = sys.argv[1:]
+bundle = os.path.join(dest, "Contents", "Resources", "runtime.path")
+os.makedirs(os.path.dirname(bundle), exist_ok=True)
+with open(bundle, "w", encoding="utf-8") as handle:
+    handle.write(f"PYTHONHOME={pythonhome}\nPYTHONPATH={pythonpath}\n")
 PY
+
+LAUNCHER="$DEST/Contents/MacOS/H250 PTT"
+LAUNCHER_SRC="$(mktemp "${TMPDIR:-/tmp}/h250-launcher.XXXXXX.c")"
+cat > "$LAUNCHER_SRC" <<'EOF'
+#include <limits.h>
+#include <mach-o/dyld.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <Python.h>
+
+static int load_runtime(const char *path) {
+    FILE *file = fopen(path, "r");
+    char line[8192];
+    int got_home = 0;
+    int got_path = 0;
+    if (!file) {
+        return 0;
+    }
+    while (fgets(line, sizeof line, file)) {
+        char *newline = strchr(line, '\n');
+        char *equals;
+        if (newline) {
+            *newline = 0;
+        }
+        if (line[0] == '#' || line[0] == 0) {
+            continue;
+        }
+        equals = strchr(line, '=');
+        if (!equals) {
+            continue;
+        }
+        *equals = 0;
+        if (strcmp(line, "PYTHONHOME") == 0) {
+            setenv("PYTHONHOME", equals + 1, 1);
+            got_home = 1;
+        } else if (strcmp(line, "PYTHONPATH") == 0) {
+            setenv("PYTHONPATH", equals + 1, 1);
+            got_path = 1;
+        }
+    }
+    fclose(file);
+    return got_home && got_path;
+}
+
+static int bundle_runtime(char *out, size_t out_len) {
+    char exe[PATH_MAX];
+    char *slash;
+    uint32_t size = sizeof exe;
+    int wrote;
+    if (_NSGetExecutablePath(exe, &size) != 0) {
+        return 0;
+    }
+    slash = strrchr(exe, '/');
+    if (!slash) {
+        return 0;
+    }
+    *slash = 0;
+    slash = strrchr(exe, '/');
+    if (!slash) {
+        return 0;
+    }
+    *slash = 0;
+    wrote = snprintf(out, out_len, "%s/Resources/runtime.path", exe);
+    return wrote > 0 && (size_t)wrote < out_len;
+}
+
+int main(void) {
+    char path[PATH_MAX];
+    int rc;
+    if (!bundle_runtime(path, sizeof path) || !load_runtime(path)) {
+        fprintf(stderr, "H250 PTT could not read runtime.path inside the app.\n");
+        fprintf(stderr, "Run scripts/install_menubar_app.sh. The app installs to /Applications.\n");
+        return 1;
+    }
+    Py_Initialize();
+    rc = PyRun_SimpleString("from h250mac.menubar import main; raise SystemExit(main() or 0)");
+    return rc == 0 ? 0 : 1;
+}
+EOF
 
 "$CLANG" -isysroot "$SDK" -arch arm64 -Os \
   -I"$PYINCLUDE" \
@@ -122,7 +199,10 @@ echo "Installed $DEST"
 echo "Open it from Finder → Applications → H250 PTT, or run:"
 echo "  open \"$DEST\""
 echo ""
-echo "The launcher imports $ROOT/src on PYTHONPATH. Quit and reopen H250 PTT after a source edit. That does not need a recompile."
+echo "Python paths are inside that app at Contents/Resources/runtime.path."
+echo "Quit and reopen H250 PTT after a source edit. That does not need a recompile."
+echo "Only one copy should run. A second copy cannot open the handset."
 echo "Running this installer again re-signs the app and changes its cdhash."
 echo "Turn H250 PTT off and on under System Settings → Privacy & Security → Accessibility, or the listener will refuse to post keys."
+echo "Do not enable Python or uv under Accessibility. This app does not need Full Disk Access."
 codesign -dv --verbose=4 "$LAUNCHER" 2>&1 | awk -F= '/^CDHash=/{print "cdhash " $2}'

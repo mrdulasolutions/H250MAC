@@ -85,6 +85,7 @@ def test_mac_presets_are_hold_to_talk_apps():
     assert status_label(PRIMARY_PRESETS, "space", "Zoom") == "Zoom"
     assert status_label(SECONDARY_PRESETS, "control-space") == "Teams"
     assert status_label(SECONDARY_PRESETS, "") == "Off"
+    assert status_label(PRIMARY_PRESETS, "control-m", "⌃M") == "⌃M"
 
 
 def test_saved_app_label_is_kept(tmp_path, monkeypatch):
@@ -105,6 +106,13 @@ def test_saved_app_label_is_kept(tmp_path, monkeypatch):
     loaded = load_config()
     assert loaded.key == "control-m"
     assert loaded.key_label == ""
+
+    path.write_text(
+        json.dumps({"key": "control-m", "key_label": "⌃M"}),
+        encoding="utf-8",
+    )
+    loaded = load_config()
+    assert loaded.key_label == "⌃M"
 
 
 def test_config_path_under_application_support():

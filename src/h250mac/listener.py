@@ -40,6 +40,20 @@ def matching_devices() -> list[dict]:
     return found
 
 
+def interface_skip_message(exc: BaseException) -> str:
+    """Explain a failed HID open.
+
+    ``open failed`` with no errno means another program already seized the
+    handset. It is not an Accessibility or Input Monitoring error.
+    """
+    if "open failed" in str(exc).lower():
+        return (
+            "skipped an interface (already open). Quit the other H250 PTT "
+            "that has this handset, then open this one."
+        )
+    return f"skipped an interface ({exc})"
+
+
 def open_devices() -> list[tuple[dict, object]]:
     opened = []
     for info in matching_devices():
@@ -48,7 +62,7 @@ def open_devices() -> list[tuple[dict, object]]:
             dev.open_path(info["path"])
             dev.set_nonblocking(True)
         except OSError as exc:
-            log(f"skipped an interface ({exc})")
+            log(interface_skip_message(exc))
             continue
         opened.append((info, dev))
     return opened

@@ -1,70 +1,62 @@
-# H250 Mac
+# H250 on a Mac
 
-Holds a Mac key while the side button is down on a [TEC Devices H250-USB](https://tec-devices.com/product/h-250-usb-handset/) handset.
+This is the setup from the video. You plug in a TEC handset, choose a key, and hold the side button while you talk. The Mac already plays the earpiece and uses the microphone. This app holds the key down for you, the same way TEC's Windows tray app does.
 
-The handset is a USB headset. macOS already plays audio and records the mic once it is plugged in. The side button is not a keyboard key. TEC's Windows tray app reads a HID report and synthesizes the key. This program does that on macOS.
+The side button is not a keyboard key. Leave TEC's Windows installer on the CD. It does not run on a Mac.
 
-The Windows installer does not run on a Mac. Leave it on the CD.
+## Get the handset
 
-## Install on a Mac
+Buy the [TEC Devices H-250 USB handset](https://tec-devices.com/product/h-250-usb-handset/). That is the handset in the video.
 
-Python 3.11 or newer. The `hidapi` package ships its own library, so Homebrew is not required.
+Plug it into a USB-C port. A USB-A to USB-C adapter is fine. In System Settings → Sound, choose the H-250 for both output and input. Audio does not go through this app.
+
+## Install it with your AI
+
+You do not have to type the install commands yourself. Clone the project, open the folder in Cursor, and paste the prompt below.
 
 ```bash
 git clone https://github.com/mrdulasolutions/H250MAC.git
 cd H250MAC
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install .
-h250-ptt --check
-h250-ptt
 ```
 
-`h250-ptt --check` exits 0 when the handset's HID interface is present. Until then the listener waits and prints a line when you plug the handset into a USB-C port.
+Open that `H250MAC` folder in Cursor, then paste:
 
-Audio is separate from this program. In System Settings → Sound, choose the H250-USB device for output and input.
-
-## The key
-
-The default key is **F13**. It does not type a character and does not toggle Caps Lock, so a radio app or a voice app can bind it as push-to-talk.
-
-```bash
-h250-ptt --key f18
-h250-ptt --key space
-h250-ptt --key v --key2 f14
+```text
+Install H250 PTT by following README.md.
+Put the app in /Applications/H250 PTT.app on the startup disk.
+Use the project's install script. Use the Xcode toolchain clang, not /usr/bin/clang.
+Do not accept the Xcode license.
+Do not install the app into the home folder.
+When it is installed, open /Applications/H250 PTT.app.
+Tell me to turn on H250 PTT under Privacy & Security → Accessibility, and to leave Python and uv off.
 ```
 
-`--key2` is the second side control. With no `--key2`, that control is printed and ignored.
+The app lands in `/Applications`, next to your other Mac apps. It has no Dock icon. Look for **H250** in the menu bar.
 
-The first launch needs permission to post keys: System Settings → Privacy & Security → Accessibility, and enable the terminal (or other app) you started `h250-ptt` from. `--dump` prints each HID report and does not post a key, so you can confirm the button before granting that permission.
-
-Stop the listener with Ctrl-C. If a key is still down, the program releases it on the way out.
-
-Saved hotkeys live in `~/Library/Application Support/h250mac/config.json`. When you omit `--key`, `--key2`, or `--byte`, `h250-ptt` reads that file.
-
-## Menu bar app
-
-Install the **H250** app into Applications (recommended). It runs from the top menu bar only (no Dock icon) and walks you through Accessibility on first launch. macOS lists it as **H250**, not Python.
+If you would rather run the install yourself:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install -e ".[menubar]"
 chmod +x scripts/install_menubar_app.sh
 ./scripts/install_menubar_app.sh
-open ~/Applications/H250\ PTT.app
+open "/Applications/H250 PTT.app"
 ```
 
-The app people open is `~/Applications/H250 PTT.app`, bundle id `com.mrdulasolutions.h250mac`, menu title **H250**. `~` is your home directory, whether that is an external volume or `/Users/yourname`.
+Python 3.11 or newer is enough. You do not need Homebrew.
 
-On macOS 26, Control Center hosts a third-party status item only when the running process image is the app's own Mach-O. The installer compiles an arm64 launcher with the Xcode toolchain clang (not `/usr/bin/clang`), links the venv's libpython, and runs `h250mac.menubar` in that process. It asks the venv interpreter for its prefix, headers, and site-packages, so the Python version and the home-directory location are not hard-coded. A missing toolchain or SDK stops the install. A shell script that execs Python never gets an icon.
+On first use, click **H250** in the menu bar. If it says **Accessibility: required — click to enable**, follow that and turn on **H250 PTT**. Leave Python and uv off. This app does not need Full Disk Access.
 
-The launcher sets `PYTHONPATH` to this repo's `src` plus the venv site-packages. Quit and reopen **H250 PTT** after a source edit. That does not need a recompile. Running the installer again re-signs the app and changes its cdhash. Accessibility is stored against that hash, so turn **H250 PTT** off and on under System Settings → Privacy & Security → Accessibility. A stale grant stays listed while the listener still refuses to post keys.
+Run only one copy. A second copy can see the handset but cannot open the side button.
 
-On first launch, follow the alert and enable **H250 PTT** under System Settings → Privacy & Security → Accessibility (the handset photo is the app icon there). Use the menu item **Accessibility: required — click to enable** if you need the prompt again. The Settings row under Menu Bar → Allow in the Menu Bar appears after Control Center has hosted the icon.
+Quit and reopen **H250 PTT** after a source change. You do not need to install again for that. Running the installer again changes the app's signature. After that, turn **H250 PTT** off and on under Accessibility, or the button will be detected and the key will not be posted.
 
-Icons are built from `macos/AppIconSource.jpg` when you run the install script. To refresh them after changing the source image: `./scripts/generate_macos_icons.sh`.
+## Use it
 
-The side button holds a Mac hotkey. The second side control holds a Windows hotkey. The menu labels are the app names:
+1. Plug in the handset and select it for sound input and output.
+2. Click **H250** in the menu bar.
+3. Choose the app you talk into. The side button holds the Mac key. The second side control holds the Windows key.
 
 | App | Mac (side button) | Windows (second control) |
 | --- | --- | --- |
@@ -73,41 +65,33 @@ The side button holds a Mac hotkey. The second side control holds a Windows hotk
 | Teams | Option-Space | Control-Space |
 | Meet | Space | Space |
 
-**Set Mac hotkey…** and **Set Windows hotkey…** still take any other name, such as `f18` or `uptick-m`. Spaces, underscores, and `+` are fine, so `Control + M` works. Uptick is the `` ` `` key. A name that is not in the list stays checked in that submenu. Discord has no default push-to-talk key, so set that one with the custom prompt.
+4. Hold the side button to talk, then let go. The key is released when you release the button.
 
-For development without the `.app` bundle:
+To use a different shortcut, click **Set Mac hotkey…** or **Set Windows hotkey…** and press the keys. The menu shows the Mac symbols: ⌃ Control, ⌥ Option, ⇧ Shift, ⌘ Command. Control-M appears as ⌃M. Click **Set**. On the Windows side, **Off** clears that control.
 
-```bash
-python -m pip install -e ".[menubar]"
-h250-ptt-menubar
-```
+Zoom and Meet both use the space bar, so pick the name of the app you have open. Teams on a Mac is Option-Space. Teams on Windows is Control-Space. Discord has no default key, so record the one you set inside Discord.
 
-macOS lists that process as **Python**. Use `open ~/Applications/H250\ PTT.app` when you want the permission dialog to say **H250 PTT**.
+The choice is saved. The next time you open **H250**, it uses the same keys.
 
-## What the button report looks like
+## If the button does nothing
 
-The handset enumerates as USB vendor `0x0D8C`, product `0x0013` (or `0xAAA0`–`0xAAAF` if that unit was given its own id). The Windows mapper reads input-report byte 2:
+- The menu should say the handset is connected. If not, try another USB port.
+- The menu should say Accessibility is allowed, and the switch must be **H250 PTT**, not Python.
+- Quit any other **H250 PTT**. Only one copy can hold the side button.
+- In the app you are talking to, click the text field or meeting window first. The held key goes to whatever is in front.
 
-| Byte 2 | Meaning |
-| --- | --- |
-| `0x00`–`0x0F` | released |
-| high nibble `1` (`0x10`–`0x1F`) | side button held |
-| high nibble `2` (`0x20`–`0x2F`) | second side control held |
+## Notes for later
 
-On macOS the report id is omitted, so this handset's side button arrives one byte earlier (`00 11 00 00` held, `00 01 00 00` released). The listener checks that byte too. If a live press moves a different byte, the log shows the whole report. Point the listener at the byte that changes:
+The command-line listener is `h250-ptt`. `h250-ptt --check` reports whether the handset is plugged in. `h250-ptt --dump` prints each button report and does not press a key. Saved keys live in `~/Library/Application Support/h250mac/config.json`.
 
-```bash
-h250-ptt --dump --byte 1
-```
+The handset is USB vendor `0x0D8C`, product `0x0013` or `0xAAA0`–`0xAAAF`. The side button is a press in the HID report. On a Mac that press shows up one byte earlier than in TEC's Windows app (`00 11 00 00` held, `00 01 00 00` released). This project checks both.
 
-## Tests
+Tests do not need the handset:
 
 ```bash
 python -m pip install -e ".[dev]"
 python -m pytest
 ```
-
-The tests cover the report byte and the key names. They do not need the handset.
 
 ## License
 

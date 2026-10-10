@@ -3,11 +3,15 @@ import pytest
 from h250mac.bindings import BindingStore
 from h250mac.keys import (
     DEFAULT_KEY,
+    FLAG_COMMAND,
     FLAG_CONTROL,
     FLAG_OPTION,
+    FLAG_SHIFT,
     canonical_key_name,
+    chord_from_keycode,
     resolve_chord,
     resolve_key,
+    shortcut_label,
 )
 
 
@@ -63,6 +67,21 @@ def test_teams_hold_keys():
     assert windows.modifiers == (0x3B,)
 
 
+def test_captured_mac_modifiers():
+    assert chord_from_keycode(0x2E, FLAG_CONTROL) == "control-m"
+    assert shortcut_label("control-m") == "⌃M"
+    assert chord_from_keycode(0x28, FLAG_SHIFT | FLAG_COMMAND) == "shift-command-k"
+    assert shortcut_label("shift-command-k") == "⇧⌘K"
+    assert shortcut_label("option-space") == "⌥Space"
+    assert chord_from_keycode(0x3B, FLAG_CONTROL) == "control"
+    assert shortcut_label("control") == "⌃"
+    assert canonical_key_name("⌘⇧K") == "shift-command-k"
+    chord = resolve_chord("command-m")
+    assert chord.keycode == 0x2E
+    assert chord.flags == FLAG_COMMAND
+    assert chord.modifiers == (0x37,)
+
+
 def test_plain_key_chord_has_no_modifier():
     chord = resolve_chord("f13")
     assert chord.keycode == 0x69
@@ -89,7 +108,9 @@ def test_menu_prompt_accepts_a_new_hotkey():
     with pytest.raises(ValueError, match="Choose a key"):
         menu_key_name("off", required=True)
     with pytest.raises(ValueError, match="unknown key"):
-        menu_key_name("option-m", required=True)
+        menu_key_name("not-a-key", required=True)
+    assert menu_key_name("⌃M", required=True) == "control-m"
+    assert menu_key_name("option-m", required=True) == "option-m"
 
 
 def test_post_chord_releases_modifier_if_letter_fails(monkeypatch):
