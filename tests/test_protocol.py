@@ -1,4 +1,4 @@
-from h250mac.protocol import PIDS, VID, button_nibble
+from h250mac.protocol import PIDS, VID, button_from_report, button_nibble
 
 
 def test_identity_matches_the_windows_mapper():
@@ -38,3 +38,10 @@ def test_short_report_is_released():
 def test_byte_index_can_move():
     assert button_nibble([0, 0x10, 0x00], index=1) == 1
     assert button_nibble(bytes([0, 0, 0x20])) == 2
+
+
+def test_macos_handset_press_is_one_byte_earlier():
+    assert button_from_report([0x00, 0x01, 0x00, 0x00]) == 0
+    assert button_from_report([0x00, 0x11, 0x00, 0x00]) == 1
+    assert button_from_report([0x00, 0x00, 0x11, 0x00]) == 1
+    assert button_from_report([0x00, 0x00, 0x21, 0x00]) == 2

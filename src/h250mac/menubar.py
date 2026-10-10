@@ -7,8 +7,18 @@ import sys
 import threading
 
 from h250mac.bindings import BindingStore
-from h250mac.config import MENU_PRESETS, load_config, save_config
+from h250mac.config import (
+    PRIMARY_PRESETS,
+    SECONDARY_PRESETS,
+    HotkeyPreset,
+    display_name,
+    load_config,
+    preset_keys,
+    save_config,
+    status_label,
+)
 from h250mac.events import accessibility_trusted, request_accessibility_prompt
+from h250mac.keys import menu_key_name
 from h250mac.listener import matching_devices, run_listener
 from h250mac.macos_gui import (
     APP_BUNDLE_NAME,
@@ -35,12 +45,6 @@ LEGACY_ACCESSIBILITY_URL = (
 )
 
 
-def preset_label(name: str) -> str:
-    if name == "`":
-        return "` (backtick)"
-    return name
-
-
 def quiet_listener_log(msg: str) -> None:
     if msg.startswith("report["):
         return
@@ -59,8 +63,12 @@ class H250MenubarApp(rumps.App):
         self.cfg = load_config()
         self.bindings = BindingStore(self.cfg.key, self.cfg.key2)
         self._stop = threading.Event()
-        self._primary_items: dict[str, rumps.MenuItem] = {}
-        self._secondary_items: dict[str, rumps.MenuItem] = {}
+        self._primary_items: list[rumps.MenuItem] = []
+        self._secondary_items: list[rumps.MenuItem] = []
+        self._primary_extra: rumps.MenuItem | None = None
+        self._secondary_extra: rumps.MenuItem | None = None
+        self._primary_status: rumps.MenuItem | None = None
+        self._secondary_status: rumps.MenuItem | None = None
         self._build_menu()
         self._refresh_checks()
         self._update_device_line()
@@ -84,59 +92,159 @@ class H250MenubarApp(rumps.App):
             "Accessibility: checking…",
             callback=self.enable_accessibility,
         )
+        self._primary_status = rumps.MenuItem("Mac: …")
+        self._secondary_status = rumps.MenuItem("Windows: …")
+        self._primary_extra = self._extra_item(self._on_primary)
+        self._secondary_extra = self._extra_item(self._on_secondary)
         primary_children = [
-            self._make_primary_item(name) for name in MENU_PRESETS
+            self._primary_extra,
+            *[self._make_primary_item(preset) for preset in PRIMARY_PRESETS],
         ]
         secondary_children = [
-            self._make_secondary_item("", "Off"),
-        ] + [self._make_secondary_item(name) for name in MENU_PRESETS]
+            self._secondary_extra,
+            self._make_secondary_item(HotkeyPreset("Off", "")),
+            *[self._make_secondary_item(preset) for preset in SECONDARY_PRESETS],
+        ]
         self.menu = [
             self._device_item,
             self._ax_item,
             None,
-            ("Primary key", primary_children),
-            ("Secondary key", secondary_children),
+            self._primary_status,
+            rumps.MenuItem("Set Mac hotkey…", callback=self._prompt_primary),
+            self._secondary_status,
+            rumps.MenuItem("Set Windows hotkey…", callback=self._prompt_secondary),
+            None,
+            ("Mac", primary_children),
+            ("Windows", secondary_children),
             None,
             rumps.MenuItem("Open Accessibility Settings…", callback=self.open_accessibility),
             rumps.MenuItem("Quit", callback=self.quit_app),
         ]
+        self._show_extra(1, self.cfg.key, self.cfg.key_label)
+        self._show_extra(2, self.cfg.key2, self.cfg.key2_label)
 
-    def _make_primary_item(self, key_name: str) -> rumps.MenuItem:
-        item = rumps.MenuItem(preset_label(key_name), callback=self._on_primary)
-        item._h250_key = key_name  # type: ignore[attr-defined]
-        self._primary_items[key_name] = item
+    def _extra_item(self, callback) -> rumps.MenuItem:
+        item = rumps.MenuItem("Custom", callback=callback)
+        item._h250_key = ""  # type: ignore[attr-defined]
+        item.hidden = True
         return item
 
-    def _make_secondary_item(self, key_name: str, label: str | None = None) -> rumps.MenuItem:
-        text = label if label is not None else preset_label(key_name)
-        item = rumps.MenuItem(text, callback=self._on_secondary)
-        item._h250_key = key_name  # type: ignore[attr-defined]
-        self._secondary_items[key_name] = item
+    def _make_primary_item(self, preset: HotkeyPreset) -> rumps.MenuItem:
+        item = rumps.MenuItem(preset.label, callback=self._on_primary)
+        item._h250_key = preset.key  # type: ignore[attr-defined]
+        item._h250_label = preset.label  # type: ignore[attr-defined]
+        self._primary_items.append(item)
+        return item
+
+    def _make_secondary_item(self, preset: HotkeyPreset) -> rumps.MenuItem:
+        item = rumps.MenuItem(preset.label, callback=self._on_secondary)
+        item._h250_key = preset.key  # type: ignore[attr-defined]
+        item._h250_label = preset.label  # type: ignore[attr-defined]
+        self._secondary_items.append(item)
         return item
 
     def _on_primary(self, sender: rumps.MenuItem) -> None:
-        key_name = getattr(sender, "_h250_key", "")
-        self._select_key(1, key_name)
+        self._select_key(
+            1,
+            getattr(sender, "_h250_key", ""),
+            getattr(sender, "_h250_label", ""),
+        )
 
     def _on_secondary(self, sender: rumps.MenuItem) -> None:
-        key_name = getattr(sender, "_h250_key", "")
-        self._select_key(2, key_name)
+        self._select_key(
+            2,
+            getattr(sender, "_h250_key", ""),
+            getattr(sender, "_h250_label", ""),
+        )
 
-    def _select_key(self, which: int, key_name: str) -> None:
+    def _prompt_primary(self, _sender: object) -> None:
+        self._prompt_key(1)
+
+    def _prompt_secondary(self, _sender: object) -> None:
+        self._prompt_key(2)
+
+    def _prompt_key(self, which: int) -> None:
+        current = self.cfg.key if which == 1 else self.cfg.key2
+        presets = PRIMARY_PRESETS if which == 1 else SECONDARY_PRESETS
+        title = "Mac hotkey" if which == 1 else "Windows hotkey"
+        if which == 1:
+            message = "Examples: control-m, option-space, space, f18. Uptick is the ` key."
+        else:
+            message = (
+                "Examples: control-space, control-m, space, v. "
+                "Leave the box empty, or type off, to clear it."
+            )
+        response = rumps.Window(
+            message,
+            title,
+            default_text=current,
+            ok="Set",
+            cancel="Cancel",
+            dimensions=(360, 24),
+        ).run()
+        if not response.clicked:
+            return
+        try:
+            key_name = menu_key_name(response.text or "", required=which == 1)
+        except ValueError as exc:
+            rumps.alert(title, str(exc), "OK")
+            return
+        self._select_key(which, key_name, status_label(presets, key_name))
+
+    def _select_key(self, which: int, key_name: str, label: str = "") -> None:
         if which == 1:
             self.bindings.set_primary(key_name)
-            self.cfg.key = key_name
+            self.cfg.key = self.bindings.primary
+            self.cfg.key_label = "" if not self.cfg.key else label
         else:
             self.bindings.set_secondary(key_name)
-            self.cfg.key2 = key_name
+            self.cfg.key2 = self.bindings.secondary
+            self.cfg.key2_label = "" if not self.cfg.key2 else label
+        shown = self.cfg.key_label if which == 1 else self.cfg.key2_label
+        self._show_extra(which, self.cfg.key if which == 1 else self.cfg.key2, shown)
         save_config(self.cfg)
         self._refresh_checks()
 
+    def _show_extra(self, which: int, key_name: str, label: str) -> None:
+        extra = self._primary_extra if which == 1 else self._secondary_extra
+        items = self._primary_items if which == 1 else self._secondary_items
+        presets = PRIMARY_PRESETS if which == 1 else SECONDARY_PRESETS
+        if extra is None:
+            return
+        if extra in items:
+            items.remove(extra)
+        if key_name and key_name not in preset_keys(presets):
+            extra.hidden = False
+            extra.title = label or display_name(key_name)
+            extra._h250_key = key_name  # type: ignore[attr-defined]
+            extra._h250_label = extra.title  # type: ignore[attr-defined]
+            items.append(extra)
+        else:
+            extra.hidden = True
+            extra._h250_key = ""  # type: ignore[attr-defined]
+            extra._h250_label = ""  # type: ignore[attr-defined]
+
+    def _item_selected(self, item: rumps.MenuItem, which: int) -> bool:
+        key = self.cfg.key if which == 1 else self.cfg.key2
+        label = self.cfg.key_label if which == 1 else self.cfg.key2_label
+        if getattr(item, "_h250_key", None) != key:
+            return False
+        item_label = getattr(item, "_h250_label", "")
+        if label and item_label:
+            return item_label == label
+        return True
+
     def _refresh_checks(self) -> None:
-        for name, item in self._primary_items.items():
-            item.state = 1 if name == self.cfg.key else 0
-        for name, item in self._secondary_items.items():
-            item.state = 1 if name == self.cfg.key2 else 0
+        for item in self._primary_items:
+            item.state = 1 if self._item_selected(item, 1) else 0
+        for item in self._secondary_items:
+            item.state = 1 if self._item_selected(item, 2) else 0
+        if self._primary_status is not None:
+            shown = status_label(PRIMARY_PRESETS, self.cfg.key, self.cfg.key_label)
+            self._primary_status.title = f"Mac: {shown}"
+        if self._secondary_status is not None:
+            shown = status_label(SECONDARY_PRESETS, self.cfg.key2, self.cfg.key2_label)
+            self._secondary_status.title = f"Windows: {shown}"
 
     def _update_device_line(self) -> None:
         try:

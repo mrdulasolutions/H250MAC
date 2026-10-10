@@ -51,14 +51,29 @@ python3 -m venv .venv
 source .venv/bin/activate
 chmod +x scripts/install_menubar_app.sh
 ./scripts/install_menubar_app.sh
-open ~/Applications/H250.app
+open ~/Applications/H250\ PTT.app
 ```
 
-On first launch, follow the alert and enable **H250** under System Settings → Privacy & Security → Accessibility (the handset photo is the app icon there). Use the menu item **Accessibility: required — click to enable** if you need the prompt again.
+The app people open is `~/Applications/H250 PTT.app`, bundle id `com.mrdulasolutions.h250mac`, menu title **H250**. `~` is your home directory, whether that is an external volume or `/Users/yourname`.
+
+On macOS 26, Control Center hosts a third-party status item only when the running process image is the app's own Mach-O. The installer compiles an arm64 launcher with the Xcode toolchain clang (not `/usr/bin/clang`), links the venv's libpython, and runs `h250mac.menubar` in that process. It asks the venv interpreter for its prefix, headers, and site-packages, so the Python version and the home-directory location are not hard-coded. A missing toolchain or SDK stops the install. A shell script that execs Python never gets an icon.
+
+The launcher sets `PYTHONPATH` to this repo's `src` plus the venv site-packages. Quit and reopen **H250 PTT** after a source edit. That does not need a recompile. Running the installer again re-signs the app and changes its cdhash. Accessibility is stored against that hash, so turn **H250 PTT** off and on under System Settings → Privacy & Security → Accessibility. A stale grant stays listed while the listener still refuses to post keys.
+
+On first launch, follow the alert and enable **H250 PTT** under System Settings → Privacy & Security → Accessibility (the handset photo is the app icon there). Use the menu item **Accessibility: required — click to enable** if you need the prompt again. The Settings row under Menu Bar → Allow in the Menu Bar appears after Control Center has hosted the icon.
 
 Icons are built from `macos/AppIconSource.jpg` when you run the install script. To refresh them after changing the source image: `./scripts/generate_macos_icons.sh`.
 
-Presets include F13–F16, F18, backtick (`` ` ``), space, and V. Secondary can be **Off** or any of those keys.
+The side button holds a Mac hotkey. The second side control holds a Windows hotkey. The menu labels are the app names:
+
+| App | Mac (side button) | Windows (second control) |
+| --- | --- | --- |
+| Cursor | Control-M | Control-M |
+| Zoom | Space | Space |
+| Teams | Option-Space | Control-Space |
+| Meet | Space | Space |
+
+**Set Mac hotkey…** and **Set Windows hotkey…** still take any other name, such as `f18` or `uptick-m`. Spaces, underscores, and `+` are fine, so `Control + M` works. Uptick is the `` ` `` key. A name that is not in the list stays checked in that submenu. Discord has no default push-to-talk key, so set that one with the custom prompt.
 
 For development without the `.app` bundle:
 
@@ -67,7 +82,7 @@ python -m pip install -e ".[menubar]"
 h250-ptt-menubar
 ```
 
-macOS lists that process as **Python**. Use `open ~/Applications/H250.app` when you want the permission dialog to say **H250**.
+macOS lists that process as **Python**. Use `open ~/Applications/H250\ PTT.app` when you want the permission dialog to say **H250 PTT**.
 
 ## What the button report looks like
 
@@ -79,7 +94,7 @@ The handset enumerates as USB vendor `0x0D8C`, product `0x0013` (or `0xAAA0`–`
 | high nibble `1` (`0x10`–`0x1F`) | side button held |
 | high nibble `2` (`0x20`–`0x2F`) | second side control held |
 
-If a live press moves a different byte, the log shows the whole report. Point the listener at the byte that changes:
+On macOS the report id is omitted, so this handset's side button arrives one byte earlier (`00 11 00 00` held, `00 01 00 00` released). The listener checks that byte too. If a live press moves a different byte, the log shows the whole report. Point the listener at the byte that changes:
 
 ```bash
 h250-ptt --dump --byte 1

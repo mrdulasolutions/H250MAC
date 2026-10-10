@@ -29,3 +29,16 @@ def button_nibble(report: list[int] | bytes, index: int = REPORT_BYTE) -> int:
     if high in (1, 2):
         return high
     return 0
+
+
+def button_from_report(report: list[int] | bytes, index: int = REPORT_BYTE) -> int:
+    """Return the held control for a Windows or macOS report.
+
+    The Windows mapper reads byte 2 from a buffer that includes the report
+    id. hidapi on macOS omits a zero report id, so the same press arrives
+    one byte earlier.
+    """
+    found = button_nibble(report, index)
+    if found or index <= 0:
+        return found
+    return button_nibble(report, index - 1)

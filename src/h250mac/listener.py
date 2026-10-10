@@ -11,9 +11,9 @@ from collections.abc import Callable
 
 from h250mac.bindings import BindingStore
 from h250mac.config import load_config
-from h250mac.events import accessibility_trusted, post_key
-from h250mac.keys import DEFAULT_KEY, resolve_key
-from h250mac.protocol import PIDS, REPORT_BYTE, VID, button_nibble
+from h250mac.events import accessibility_trusted, post_chord
+from h250mac.keys import DEFAULT_KEY, KeyChord, canonical_key_name
+from h250mac.protocol import PIDS, REPORT_BYTE, VID, button_from_report
 
 try:
     import hid
@@ -76,7 +76,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--key",
         default=None,
-        help=f"key to hold while the side button is down (default: config or {DEFAULT_KEY})",
+        help=(
+            f"key to hold while the side button is down "
+            f"(default: config or {DEFAULT_KEY}; also uptick-m, control-m)"
+        ),
     )
     parser.add_argument(
         "--key2",
@@ -105,21 +108,21 @@ def build_parser() -> argparse.ArgumentParser:
 def _sync_bindings(
     bindings: BindingStore,
     held: dict[int, bool],
-    keycodes: dict[int, int | None],
+    chords: dict[int, KeyChord | None],
     names: dict[int, str],
     dump: bool,
     log_fn: Callable[[str], None],
 ) -> None:
     snap = bindings.snapshot()
     for button in (1, 2):
-        new_code = snap.keycodes[button]
-        old_code = keycodes[button]
-        if new_code == old_code and snap.names[button] == names[button]:
+        new_chord = snap.chords[button]
+        old_chord = chords[button]
+        if new_chord == old_chord and snap.names[button] == names[button]:
             continue
-        if held[button] and old_code is not None and not dump:
-            post_key(old_code, False)
+        if held[button] and old_chord is not None and not dump:
+            post_chord(old_chord, False)
             held[button] = False
-        keycodes[button] = new_code
+        chords[button] = new_chord
         names[button] = snap.names[button]
 
 
@@ -148,13 +151,13 @@ def run_listener(
         )
 
     held = {1: False, 2: False}
-    keycodes = dict(snap.keycodes)
+    chords = dict(snap.chords)
     names = dict(snap.names)
 
     def release_all() -> None:
         for which, is_down in list(held.items()):
-            if is_down and keycodes[which] is not None and not dump:
-                post_key(keycodes[which], False)
+            if is_down and chords[which] is not None and not dump:
+                post_chord(chords[which], False)
             held[which] = False
 
     devs: list[tuple[dict, object]] = []
@@ -163,7 +166,7 @@ def run_listener(
 
     try:
         while not should_stop():
-            _sync_bindings(bindings, held, keycodes, names, dump, log_fn)
+            _sync_bindings(bindings, held, chords, names, dump, log_fn)
             if not devs:
                 devs = open_devices()
                 if not devs:
@@ -194,16 +197,16 @@ def run_listener(
                 if last_report.get(path) == signature:
                     continue
                 last_report[path] = signature
-                which = button_nibble(report, report_byte)
+                which = button_from_report(report, report_byte)
                 shown = report[report_byte] if report_byte < len(report) else "-"
                 log_fn(f"report[{report_byte}]={shown}  {hex_report(report)}")
-                _sync_bindings(bindings, held, keycodes, names, dump, log_fn)
+                _sync_bindings(bindings, held, chords, names, dump, log_fn)
                 for button in (1, 2):
                     down = which == button
                     if down == held[button]:
                         continue
-                    code = keycodes[button]
-                    if code is None:
+                    chord = chords[button]
+                    if chord is None:
                         held[button] = down
                         if down:
                             log_fn(f"control {button} is down (no key mapped).")
@@ -215,7 +218,7 @@ def run_listener(
                                 "key not posted (Accessibility is off)."
                             )
                         else:
-                            post_key(code, down)
+                            post_chord(chord, down)
                             log_fn(f"{names[button]} {'down' if down else 'up'}")
                     held[button] = down
             if closed:
@@ -245,16 +248,11 @@ def main(argv: list[str] | None = None) -> int:
     report_byte = args.byte if args.byte is not None else file_config.byte
 
     try:
-        resolve_key(key_name)
+        key_name = canonical_key_name(key_name)
+        key2_name = canonical_key_name(key2_name)
     except ValueError as exc:
         log(str(exc))
         return 2
-    if key2_name:
-        try:
-            resolve_key(key2_name)
-        except ValueError as exc:
-            log(str(exc))
-            return 2
 
     if args.check:
         found = matching_devices()

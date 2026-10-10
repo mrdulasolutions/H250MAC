@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ctypes
-from ctypes import c_bool, c_uint16, c_uint32, c_void_p
+from ctypes import c_bool, c_uint16, c_uint32, c_uint64, c_void_p
+
+from h250mac.keys import KeyChord
 
 # kCGHIDEventTap. The focused app sees the key the same way as a real one.
 HID_TAP = 0
@@ -26,6 +28,8 @@ _cg.CGEventCreateKeyboardEvent.argtypes = [c_void_p, c_uint16, c_bool]
 _cg.CGEventCreateKeyboardEvent.restype = c_void_p
 _cg.CGEventPost.argtypes = [c_uint32, c_void_p]
 _cg.CGEventPost.restype = None
+_cg.CGEventSetFlags.argtypes = [c_void_p, c_uint64]
+_cg.CGEventSetFlags.restype = None
 _cf.CFRelease.argtypes = [c_void_p]
 _cf.CFRelease.restype = None
 _ax.AXIsProcessTrusted.argtypes = []
@@ -51,14 +55,38 @@ def request_accessibility_prompt() -> bool:
     return bool(AXIsProcessTrustedWithOptions(options))
 
 
-def post_key(keycode: int, down: bool) -> None:
+def post_key(keycode: int, down: bool, flags: int = 0) -> None:
     source = _cg.CGEventSourceCreate(HID_SOURCE)
     event = _cg.CGEventCreateKeyboardEvent(source, keycode, down)
     if not event:
         raise OSError("CoreGraphics did not create a key event")
     try:
+        if flags:
+            _cg.CGEventSetFlags(event, flags)
         _cg.CGEventPost(HID_TAP, event)
     finally:
         _cf.CFRelease(event)
         if source:
             _cf.CFRelease(source)
+
+
+def post_chord(chord: KeyChord, down: bool) -> None:
+    """Hold or release a key, including modifier keys around a chord."""
+    if not chord.modifiers and not chord.flags:
+        post_key(chord.keycode, down)
+        return
+    if down:
+        pressed: list[int] = []
+        try:
+            for modifier in chord.modifiers:
+                post_key(modifier, True)
+                pressed.append(modifier)
+            post_key(chord.keycode, True, chord.flags)
+        except Exception:
+            for modifier in reversed(pressed):
+                post_key(modifier, False)
+            raise
+        return
+    post_key(chord.keycode, False, chord.flags)
+    for modifier in reversed(chord.modifiers):
+        post_key(modifier, False)
